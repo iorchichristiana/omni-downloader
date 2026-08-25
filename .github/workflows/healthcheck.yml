@@ -1,0 +1,84 @@
+name: YouTube Cookie Health Check
+
+on:
+  schedule:
+    - cron: '0 3 * * *' # Daily at 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  check-youtube:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node.js for BotGuard
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: |
+          pip install -U "yt-dlp[default]" curl_cffi bgutil-ytdlp-pot-provider
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git $HOME/bgutil-ytdlp-pot-provider
+          cd $HOME/bgutil-ytdlp-pot-provider/server
+          npm ci
+          npm run build
+
+      - name: Test YouTube extraction
+        id: test_yt
+        continue-on-error: true
+        env:
+          SERVER_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+        run: |
+          set -eo pipefail
+          if [ -n "$SERVER_COOKIES" ]; then
+            echo "$SERVER_COOKIES" > cookies.txt
+            COOKIE_OPT="--cookies cookies.txt"
+          else
+            COOKIE_OPT=""
+          fi
+
+          yt-dlp \
+            --remote-components ejs:github \
+            --extractor-args "youtubepot-bgutilscript:server_home=$HOME/bgutil-ytdlp-pot-provider/server" \
+            --extractor-args "youtube:player_client=web_embedded,tv,android,ios" \
+            $COOKIE_OPT \
+            --dump-json --no-playlist \
+            "https://www.youtube.com/watch?v=NhEN07dahhw" > /dev/null
+
+          rm -f cookies.txt
+
+      - name: Create GitHub Issue on Failure
+        if: steps.test_yt.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = '?? YouTube cookies expired — re-export needed';
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+            });
+            const exists = issues.some(i => i.title === title);
+            if (!exists) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: '### YouTube Health Check Failed\n\nThe automated daily test download on YouTube failed. YouTube has rotated or expired the session cookies.\n\n#### Quick 2-Minute Fix:\n1. Open an Incognito/Private window and sign in to any free/burner Google/YouTube account.\n2. Export `cookies.txt` using the extension.\n3. Close the tab without clicking "Sign out".\n4. Update repository secret `YOUTUBE_COOKIES` in GitHub Settings -> Secrets -> Actions.\n\nOnce updated, close this issue.'
+              });
+              console.log('Created alert issue successfully.');
+            } else {
+              console.log('Alert issue already exists.');
+            }

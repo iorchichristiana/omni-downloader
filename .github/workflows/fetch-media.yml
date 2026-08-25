@@ -22,15 +22,19 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Set up Deno JS Engine
-        uses: denoland/setup-deno@v2
+      - name: Set up Node.js for BotGuard PO token solver
+        uses: actions/setup-node@v4
         with:
-          deno-version: v2.x
+          node-version: 22
 
-      - name: Install yt-dlp, ffmpeg, and boto3
+      - name: Install yt-dlp, ffmpeg, boto3, and build BGUtil POT provider
         run: |
           pip install -U "yt-dlp[default]" curl_cffi boto3 bgutil-ytdlp-pot-provider
           sudo apt-get update && sudo apt-get install -y ffmpeg
+          git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git $HOME/bgutil-ytdlp-pot-provider
+          cd $HOME/bgutil-ytdlp-pot-provider/server
+          npm ci
+          npm run build
 
       - name: Download media
         id: download
@@ -66,78 +70,34 @@ jobs:
 
           OUTFILE="output"
           
+          # Shared base arguments
+          ARGS=(
+            -f "$FORMAT"
+            --remote-components ejs:github
+            --extractor-args "youtubepot-bgutilscript:server_home=$HOME/bgutil-ytdlp-pot-provider/server"
+            --extractor-args "youtube:player_client=web_embedded,tv,android,ios"
+            --print-to-file "%(title)s" title.txt
+            --no-playlist
+          )
+
           if [ "$QUALITY" = "audio" ]; then
             # Audio branch: extract to MP3 (with fallback if cookie is expired)
             if [ -n "$COOKIE_FLAG" ]; then
-              yt-dlp -f "$FORMAT" \
-                $COOKIE_FLAG \
-                --remote-components ejs:github \
-                --extractor-args "youtube:player_client=android,ios" \
-                --print-to-file "%(title)s" title.txt \
-                --extract-audio --audio-format mp3 \
-                --audio-quality 0 \
-                --embed-metadata \
-                -o "${OUTFILE}.%(ext)s" \
-                --no-playlist \
-                "$MEDIA_URL" || \
-              yt-dlp -f "$FORMAT" \
-                --remote-components ejs:github \
-                --extractor-args "youtube:player_client=android,ios" \
-                --print-to-file "%(title)s" title.txt \
-                --extract-audio --audio-format mp3 \
-                --audio-quality 0 \
-                --embed-metadata \
-                -o "${OUTFILE}.%(ext)s" \
-                --no-playlist \
-                "$MEDIA_URL"
+              yt-dlp "${ARGS[@]}" $COOKIE_FLAG --extract-audio --audio-format mp3 --audio-quality 0 --embed-metadata -o "${OUTFILE}.%(ext)s" "$MEDIA_URL" || \
+              yt-dlp "${ARGS[@]}" --extract-audio --audio-format mp3 --audio-quality 0 --embed-metadata -o "${OUTFILE}.%(ext)s" "$MEDIA_URL"
             else
-              yt-dlp -f "$FORMAT" \
-                --remote-components ejs:github \
-                --extractor-args "youtube:player_client=android,ios" \
-                --print-to-file "%(title)s" title.txt \
-                --extract-audio --audio-format mp3 \
-                --audio-quality 0 \
-                --embed-metadata \
-                -o "${OUTFILE}.%(ext)s" \
-                --no-playlist \
-                "$MEDIA_URL"
+              yt-dlp "${ARGS[@]}" --extract-audio --audio-format mp3 --audio-quality 0 --embed-metadata -o "${OUTFILE}.%(ext)s" "$MEDIA_URL"
             fi
-            # Find the actual output file
             FILE=$(ls -1 ${OUTFILE}.* | head -1)
             EXT="mp3"
             MIME="audio/mpeg"
           else
             # Video branch: merge to MP4 (with fallback if cookie is expired)
             if [ -n "$COOKIE_FLAG" ]; then
-              yt-dlp -f "$FORMAT" \
-                $COOKIE_FLAG \
-                --remote-components ejs:github \
-                --extractor-args "youtube:player_client=android,ios" \
-                --print-to-file "%(title)s" title.txt \
-                --merge-output-format mp4 \
-                --embed-subs --embed-metadata \
-                -o "${OUTFILE}.%(ext)s" \
-                --no-playlist \
-                "$MEDIA_URL" || \
-              yt-dlp -f "$FORMAT" \
-                --remote-components ejs:github \
-                --extractor-args "youtube:player_client=android,ios" \
-                --print-to-file "%(title)s" title.txt \
-                --merge-output-format mp4 \
-                --embed-subs --embed-metadata \
-                -o "${OUTFILE}.%(ext)s" \
-                --no-playlist \
-                "$MEDIA_URL"
+              yt-dlp "${ARGS[@]}" $COOKIE_FLAG --merge-output-format mp4 --embed-subs --embed-metadata -o "${OUTFILE}.%(ext)s" "$MEDIA_URL" || \
+              yt-dlp "${ARGS[@]}" --merge-output-format mp4 --embed-subs --embed-metadata -o "${OUTFILE}.%(ext)s" "$MEDIA_URL"
             else
-              yt-dlp -f "$FORMAT" \
-                --remote-components ejs:github \
-                --extractor-args "youtube:player_client=android,ios" \
-                --print-to-file "%(title)s" title.txt \
-                --merge-output-format mp4 \
-                --embed-subs --embed-metadata \
-                -o "${OUTFILE}.%(ext)s" \
-                --no-playlist \
-                "$MEDIA_URL"
+              yt-dlp "${ARGS[@]}" --merge-output-format mp4 --embed-subs --embed-metadata -o "${OUTFILE}.%(ext)s" "$MEDIA_URL"
             fi
             FILE=$(ls -1 ${OUTFILE}.* | head -1)
             EXT="mp4"
