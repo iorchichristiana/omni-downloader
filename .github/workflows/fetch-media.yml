@@ -70,7 +70,7 @@ jobs:
             # Audio branch: extract to MP3
             yt-dlp -f "$FORMAT" \
               $COOKIE_FLAG \
-              --extractor-args "youtube:player_client=android_creator,android,ios,tv_embedded" \
+              --remote-components ejs:github \
               --extract-audio --audio-format mp3 \
               --audio-quality 0 \
               --embed-metadata \
@@ -85,7 +85,7 @@ jobs:
             # Video branch: merge to MP4 for universal browser playback
             yt-dlp -f "$FORMAT" \
               $COOKIE_FLAG \
-              --extractor-args "youtube:player_client=android_creator,android,ios,tv_embedded" \
+              --remote-components ejs:github \
               --merge-output-format mp4 \
               --embed-subs --embed-metadata \
               -o "${OUTFILE}.%(ext)s" \
