@@ -71,6 +71,7 @@ jobs:
             yt-dlp -f "$FORMAT" \
               $COOKIE_FLAG \
               --remote-components ejs:github \
+              --extractor-args "youtube:player_client=android,ios" \
               --print-to-file "%(title)s" title.txt \
               --extract-audio --audio-format mp3 \
               --audio-quality 0 \
@@ -87,6 +88,7 @@ jobs:
             yt-dlp -f "$FORMAT" \
               $COOKIE_FLAG \
               --remote-components ejs:github \
+              --extractor-args "youtube:player_client=android,ios" \
               --print-to-file "%(title)s" title.txt \
               --merge-output-format mp4 \
               --embed-subs --embed-metadata \
