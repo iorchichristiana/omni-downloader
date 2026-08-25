@@ -68,6 +68,7 @@ jobs:
           if [ "$QUALITY" = "audio" ]; then
             # Audio branch: extract to MP3
             yt-dlp -f "$FORMAT" \
+              --extractor-args "youtube:player_client=android,web" \
               --extract-audio --audio-format mp3 \
               --audio-quality 0 \
               --embed-metadata \
@@ -81,6 +82,7 @@ jobs:
           else
             # Video branch: merge to MP4 for universal browser playback
             yt-dlp -f "$FORMAT" \
+              --extractor-args "youtube:player_client=android,web" \
               --merge-output-format mp4 \
               --embed-subs --embed-metadata \
               -o "${OUTFILE}.%(ext)s" \
