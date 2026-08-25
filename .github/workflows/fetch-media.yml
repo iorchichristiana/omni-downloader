@@ -24,7 +24,7 @@ jobs:
 
       - name: Install yt-dlp, ffmpeg, and rclone
         run: |
-          pip install -U yt-dlp
+          pip install -U "yt-dlp[default]" curl_cffi
           sudo apt-get update && sudo apt-get install -y ffmpeg rclone
 
       - name: Configure rclone for R2
@@ -68,6 +68,7 @@ jobs:
           if [ "$QUALITY" = "audio" ]; then
             # Audio branch: extract to MP3
             yt-dlp -f "$FORMAT" \
+              --impersonate chrome \
               --extractor-args "youtube:player_client=android,web" \
               --extract-audio --audio-format mp3 \
               --audio-quality 0 \
@@ -82,6 +83,7 @@ jobs:
           else
             # Video branch: merge to MP4 for universal browser playback
             yt-dlp -f "$FORMAT" \
+              --impersonate chrome \
               --extractor-args "youtube:player_client=android,web" \
               --merge-output-format mp4 \
               --embed-subs --embed-metadata \
