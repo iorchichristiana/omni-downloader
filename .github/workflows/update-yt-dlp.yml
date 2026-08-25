@@ -1,0 +1,21 @@
+name: Weekly yt-dlp Extractor Health Check
+
+on:
+  schedule:
+    - cron: '0 4 * * 1' # Every Monday at 04:00 UTC
+  workflow_dispatch:
+
+jobs:
+  check-yt-dlp:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Test latest yt-dlp release
+        run: |
+          pip install -U yt-dlp
+          yt-dlp --version
+          echo "? yt-dlp is available and healthy."

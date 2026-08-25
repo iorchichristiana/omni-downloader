@@ -57,6 +57,7 @@ jobs:
           
           # Quality label → yt-dlp format selector mapping
           case "$QUALITY" in
+            best)  FORMAT='bestvideo*+bestaudio/best' ;;
             1080p) FORMAT='bestvideo[height<=1080]+bestaudio/best[height<=1080]/best' ;;
             720p)  FORMAT='bestvideo[height<=720]+bestaudio/best[height<=720]/best' ;;
             480p)  FORMAT='bestvideo[height<=480]+bestaudio/best[height<=480]/best' ;;
@@ -72,6 +73,7 @@ jobs:
             yt-dlp -f "$FORMAT" \
               --extract-audio --audio-format mp3 \
               --audio-quality 0 \
+              --embed-metadata \
               -o "${OUTFILE}.%(ext)s" \
               --no-playlist \
               "$MEDIA_URL"
@@ -80,15 +82,16 @@ jobs:
             EXT="mp3"
             MIME="audio/mpeg"
           else
-            # Video branch: merge to MKV (safe container for any codec combo)
+            # Video branch: merge to MP4 for universal browser playback
             yt-dlp -f "$FORMAT" \
-              --merge-output-format mkv \
+              --merge-output-format mp4 \
+              --embed-subs --embed-metadata \
               -o "${OUTFILE}.%(ext)s" \
               --no-playlist \
               "$MEDIA_URL"
             FILE=$(ls -1 ${OUTFILE}.* | head -1)
-            EXT="mkv"
-            MIME="video/x-matroska"
+            EXT="mp4"
+            MIME="video/mp4"
           fi
 
           # Oversized file guard (500 MB)

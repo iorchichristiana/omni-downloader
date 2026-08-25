@@ -33,6 +33,7 @@ CF_KV_NAMESPACE_ID = os.environ.get("CF_KV_NAMESPACE_ID", "")
 CF_API_TOKEN = os.environ.get("CF_API_TOKEN", "")
 
 QUALITY_MAP = {
+    "best": "bestvideo*+bestaudio/best",
     "1080p": "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
     "720p": "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
     "480p": "bestvideo[height<=480]+bestaudio/best[height<=480]/best",
@@ -135,7 +136,8 @@ def fetch():
                 subprocess.run(
                     [
                         "yt-dlp", "-f", fmt,
-                        "--merge-output-format", "mkv",
+                        "--merge-output-format", "mp4",
+                        "--embed-subs", "--embed-metadata",
                         "-o", f"{outfile}.%(ext)s",
                         "--no-playlist",
                         media_url,
@@ -144,8 +146,8 @@ def fetch():
                     capture_output=True,
                     timeout=300,
                 )
-                ext = "mkv"
-                mime = "video/x-matroska"
+                ext = "mp4"
+                mime = "video/mp4"
 
             # Find the actual output file
             files = glob.glob(f"{outfile}.*")

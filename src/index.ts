@@ -21,21 +21,34 @@ export interface Env {
   GITHUB_TOKEN: string;
   GITHUB_REPO: string;
   RENDER_URL?: string;
+  ALLOWED_ORIGIN?: string;
 }
 
 // ── Constants ────────────────────────────────────────────────
 
-const CORS_HEADERS: Record<string, string> = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-  'Access-Control-Max-Age': '86400',
-};
-
-const VALID_QUALITIES = ['1080p', '720p', '480p', '360p', 'audio'] as const;
+const VALID_QUALITIES = ['best', '1080p', '720p', '480p', '360p', 'audio'] as const;
 const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500 MB — oversized guard
 const PENDING_TTL = 600; // 10 min — pending entries auto-expire
 const FAILED_TTL = 3600; // 1 hour — failed entries auto-expire
+
+function getCorsHeaders(request?: Request, env?: Env): Record<string, string> {
+  const origin = request?.headers.get('Origin') || '';
+  const allowed = [
+    'https://omni-downloader.iorchichristiana.workers.dev',
+    'http://localhost:8787',
+    'http://127.0.0.1:8787',
+  ];
+  if (env?.ALLOWED_ORIGIN) allowed.push(env.ALLOWED_ORIGIN);
+
+  const matchedOrigin = allowed.includes(origin) ? origin : 'https://omni-downloader.iorchichristiana.workers.dev';
+
+  return {
+    'Access-Control-Allow-Origin': matchedOrigin,
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Max-Age': '86400',
+  };
+}
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -47,15 +60,51 @@ async function sha256(text: string): Promise<string> {
     .join('');
 }
 
-function json(body: unknown, init: ResponseInit = {}): Response {
+function isPrivateOrLocalhost(urlStr: string): boolean {
+  try {
+    const parsed = new URL(urlStr);
+    const hostname = parsed.hostname.toLowerCase();
+
+    // Loopback / localhost names
+    if (
+      hostname === 'localhost' ||
+      hostname.endsWith('.localhost') ||
+      hostname.endsWith('.local') ||
+      hostname.endsWith('.internal') ||
+      hostname === '127.0.0.1' ||
+      hostname === '0.0.0.0' ||
+      hostname === '::1'
+    ) {
+      return true;
+    }
+
+    // IPv4 private ranges
+    const ipv4Match = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (ipv4Match) {
+      const [_, a, b] = ipv4Match.map(Number);
+      if (a === 10) return true; // 10.0.0.0/8
+      if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+      if (a === 192 && b === 168) return true; // 192.168.0.0/16
+      if (a === 169 && b === 254) return true; // 169.254.0.0/16 (link-local)
+      if (a === 127) return true; // 127.0.0.0/8
+      if (a === 0) return true; // 0.0.0.0/8
+    }
+
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+function json(body: unknown, init: ResponseInit = {}, request?: Request, env?: Env): Response {
   const headers = new Headers(init.headers);
   headers.set('Content-Type', 'application/json');
-  for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v);
+  for (const [k, v] of Object.entries(getCorsHeaders(request, env))) headers.set(k, v);
   return new Response(JSON.stringify(body), { ...init, headers });
 }
 
-function noStore(body: unknown, status = 200): Response {
-  return json(body, { status, headers: { 'Cache-Control': 'no-store' } });
+function noStore(body: unknown, status = 200, request?: Request, env?: Env): Response {
+  return json(body, { status, headers: { 'Cache-Control': 'no-store' } }, request, env);
 }
 
 // ── Route handlers ───────────────────────────────────────────
@@ -66,27 +115,34 @@ async function handleDownload(request: Request, env: Env): Promise<Response> {
   try {
     payload = await request.json();
   } catch {
-    return json({ error: 'Invalid JSON body' }, { status: 400 });
+    return json({ error: 'Invalid JSON body' }, { status: 400 }, request, env);
   }
 
   const mediaUrl = payload.url?.trim();
   const quality = payload.quality?.trim();
 
   if (!mediaUrl || !quality) {
-    return json({ error: 'Missing "url" or "quality"' }, { status: 400 });
+    return json({ error: 'Missing "url" or "quality"' }, { status: 400 }, request, env);
   }
 
-  // Validate URL
+  // Validate URL protocol
   let parsed: URL;
   try {
     parsed = new URL(mediaUrl);
-    if (!parsed.protocol.startsWith('http')) throw new Error();
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return json({ error: 'Invalid URL protocol (must be http or https)' }, { status: 400 }, request, env);
+    }
   } catch {
-    return json({ error: 'Invalid URL' }, { status: 400 });
+    return json({ error: 'Invalid URL' }, { status: 400 }, request, env);
+  }
+
+  // SSRF guard
+  if (isPrivateOrLocalhost(mediaUrl)) {
+    return json({ error: 'Private or local IP addresses are not permitted' }, { status: 400 }, request, env);
   }
 
   if (!VALID_QUALITIES.includes(quality as (typeof VALID_QUALITIES)[number])) {
-    return json({ error: `Invalid quality. Must be one of: ${VALID_QUALITIES.join(', ')}` }, { status: 400 });
+    return json({ error: `Invalid quality. Must be one of: ${VALID_QUALITIES.join(', ')}` }, { status: 400 }, request, env);
   }
 
   const keyBase = await sha256(`${mediaUrl}|${quality}`);
@@ -100,13 +156,13 @@ async function handleDownload(request: Request, env: Env): Promise<Response> {
       key_base: keyBase,
       stream_url: `/api/stream/${keyBase}`,
       ...meta,
-    });
+    }, {}, request, env);
   }
 
   // 2. Already pending? → return 202 so client polls
   const pendingRaw = await env.INDEX.get(`pending:${keyBase}`);
   if (pendingRaw) {
-    return json({ status: 'pending', key_base: keyBase }, { status: 202 });
+    return json({ status: 'pending', key_base: keyBase }, { status: 202 }, request, env);
   }
 
   // 3. Previously failed? → clear and re-dispatch
@@ -130,14 +186,14 @@ async function handleDownload(request: Request, env: Env): Promise<Response> {
     const renderOk = await dispatchRender(env, mediaUrl, quality, keyBase);
     if (!renderOk) {
       await env.INDEX.delete(`pending:${keyBase}`);
-      return json({ error: 'Failed to dispatch fetch job' }, { status: 502 });
+      return json({ error: 'Failed to dispatch fetch job' }, { status: 502 }, request, env);
     }
   } else if (!dispatched) {
     await env.INDEX.delete(`pending:${keyBase}`);
-    return json({ error: 'Failed to dispatch fetch job' }, { status: 502 });
+    return json({ error: 'Failed to dispatch fetch job' }, { status: 502 }, request, env);
   }
 
-  return json({ status: 'pending', key_base: keyBase }, { status: 202 });
+  return json({ status: 'pending', key_base: keyBase }, { status: 202 }, request, env);
 }
 
 async function dispatchGitHub(env: Env, url: string, quality: string, keyBase: string): Promise<boolean> {
@@ -178,33 +234,33 @@ async function dispatchRender(env: Env, url: string, quality: string, keyBase: s
 async function handleMeta(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const keyBase = url.searchParams.get('key');
-  if (!keyBase) return noStore({ error: 'Missing "key" parameter' }, 400);
+  if (!keyBase) return noStore({ error: 'Missing "key" parameter' }, 400, request, env);
 
-  // Check cached
+  // 1. Check cached
   const cachedRaw = await env.INDEX.get(`media:${keyBase}`);
   if (cachedRaw) {
     const meta = JSON.parse(cachedRaw);
-    return noStore({ status: 'ready', key_base: keyBase, stream_url: `/api/stream/${keyBase}`, ...meta });
+    return noStore({ status: 'ready', key_base: keyBase, stream_url: `/api/stream/${keyBase}`, ...meta }, 200, request, env);
   }
 
-  // Check pending
-  const pendingRaw = await env.INDEX.get(`pending:${keyBase}`);
-  if (pendingRaw) return noStore({ status: 'pending', key_base: keyBase });
-
-  // Check failed
+  // 2. Check failed BEFORE pending — so failed jobs report immediately
   const failedRaw = await env.INDEX.get(`failed:${keyBase}`);
   if (failedRaw) {
     const meta = JSON.parse(failedRaw);
-    return noStore({ status: 'failed', ...meta });
+    return noStore({ status: 'failed', key_base: keyBase, ...meta }, 200, request, env);
   }
 
-  return noStore({ status: 'unknown' }, 404);
+  // 3. Check pending
+  const pendingRaw = await env.INDEX.get(`pending:${keyBase}`);
+  if (pendingRaw) return noStore({ status: 'pending', key_base: keyBase }, 200, request, env);
+
+  return noStore({ status: 'unknown' }, 404, request, env);
 }
 
 /** GET /api/stream/:key_base — stream from R2 with Range support */
 async function handleStream(request: Request, env: Env, keyBase: string): Promise<Response> {
   const cachedRaw = await env.INDEX.get(`media:${keyBase}`);
-  if (!cachedRaw) return json({ error: 'Not found in index' }, { status: 404 });
+  if (!cachedRaw) return json({ error: 'Not found in index' }, { status: 404 }, request, env);
 
   const meta = JSON.parse(cachedRaw) as { ext: string; mime: string; size: number };
   const range = request.headers.get('Range');
@@ -212,11 +268,11 @@ async function handleStream(request: Request, env: Env, keyBase: string): Promis
     range: request.headers,
     onlyIf: request.headers,
   });
-  if (!object || !('body' in object)) return json({ error: 'Object not in R2' }, { status: 404 });
+  if (!object || !('body' in object)) return json({ error: 'Object not in R2' }, { status: 404 }, request, env);
 
   // Oversized guard
   if (object.size > MAX_FILE_SIZE) {
-    return json({ error: 'File exceeds size limit' }, { status: 413 });
+    return json({ error: 'File exceeds size limit' }, { status: 413 }, request, env);
   }
 
   const headers = new Headers();
@@ -224,7 +280,7 @@ async function handleStream(request: Request, env: Env, keyBase: string): Promis
   headers.set('Content-Type', meta.mime || headers.get('Content-Type') || 'application/octet-stream');
   headers.set('Accept-Ranges', 'bytes');
   headers.set('Cache-Control', 'public, max-age=86400');
-  for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v);
+  for (const [k, v] of Object.entries(getCorsHeaders(request, env))) headers.set(k, v);
 
   if (range && 'range' in object && object.range) {
     const r = object.range as { offset?: number; length?: number };
@@ -248,7 +304,7 @@ export default {
 
     // CORS preflight
     if (method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: CORS_HEADERS });
+      return new Response(null, { status: 204, headers: getCorsHeaders(request, env) });
     }
 
     try {
@@ -268,12 +324,11 @@ export default {
         return await handleStream(request, env, keyBase);
       }
 
-      // Let static assets handle everything else (frontend)
-      // If no assets binding, return 404
-      return json({ error: 'Not found' }, { status: 404 });
+      // Fallback for unmatched API routes
+      return json({ error: 'Not found' }, { status: 404 }, request, env);
     } catch (err) {
       console.error('Unhandled error:', err);
-      return json({ error: 'Internal server error' }, { status: 500 });
+      return json({ error: 'Internal server error' }, { status: 500 }, request, env);
     }
   },
 };
