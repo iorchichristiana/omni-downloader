@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 download_media.py — Robust media downloader powered by yt-dlp with mobile client fallbacks,
 EJS challenge solvers, and multi-format mapping for 1,700+ platforms.
@@ -38,7 +38,7 @@ def run_ytdlp(url: str, quality: str, cookie_flag: str):
     
     if is_youtube(url):
         # Use mobile clients specifically to bypass datacenter IP bot checks
-        base_args.extend(["--extractor-args", "youtube:player_client=android_creator,android,ios"])
+        base_args.extend(["--extractor-args", "youtube:player_client=mweb,android,ios"])
 
     def execute_ytdlp(extra_cookies=True):
         cmd = list(base_args)
