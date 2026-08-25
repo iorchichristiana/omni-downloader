@@ -22,6 +22,11 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Set up Deno JS Engine
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
       - name: Install yt-dlp, ffmpeg, and boto3
         run: |
           pip install -U "yt-dlp[default]" curl_cffi boto3
@@ -38,7 +43,7 @@ jobs:
           
           # Quality label → yt-dlp format selector mapping
           case "$QUALITY" in
-            best)  FORMAT='bestvideo*+bestaudio/best' ;;
+            best)  FORMAT='bestvideo*+bestaudio/best/bestvideo/bestaudio' ;;
             1080p) FORMAT='bestvideo[height<=1080]+bestaudio/best[height<=1080]/best' ;;
             720p)  FORMAT='bestvideo[height<=720]+bestaudio/best[height<=720]/best' ;;
             480p)  FORMAT='bestvideo[height<=480]+bestaudio/best[height<=480]/best' ;;
@@ -52,8 +57,7 @@ jobs:
           if [ "$QUALITY" = "audio" ]; then
             # Audio branch: extract to MP3
             yt-dlp -f "$FORMAT" \
-              --impersonate chrome \
-              --extractor-args "youtube:player_client=android,web" \
+              --extractor-args "youtube:player_client=android_creator,android,ios,tv_embedded" \
               --extract-audio --audio-format mp3 \
               --audio-quality 0 \
               --embed-metadata \
@@ -67,8 +71,7 @@ jobs:
           else
             # Video branch: merge to MP4 for universal browser playback
             yt-dlp -f "$FORMAT" \
-              --impersonate chrome \
-              --extractor-args "youtube:player_client=android,web" \
+              --extractor-args "youtube:player_client=android_creator,android,ios,tv_embedded" \
               --merge-output-format mp4 \
               --embed-subs --embed-metadata \
               -o "${OUTFILE}.%(ext)s" \
