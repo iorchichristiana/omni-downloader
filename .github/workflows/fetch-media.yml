@@ -71,6 +71,7 @@ jobs:
             yt-dlp -f "$FORMAT" \
               $COOKIE_FLAG \
               --remote-components ejs:github \
+              --print-to-file "%(title)s" title.txt \
               --extract-audio --audio-format mp3 \
               --audio-quality 0 \
               --embed-metadata \
@@ -86,6 +87,7 @@ jobs:
             yt-dlp -f "$FORMAT" \
               $COOKIE_FLAG \
               --remote-components ejs:github \
+              --print-to-file "%(title)s" title.txt \
               --merge-output-format mp4 \
               --embed-subs --embed-metadata \
               -o "${OUTFILE}.%(ext)s" \
@@ -105,10 +107,14 @@ jobs:
             exit 2
           fi
 
+          TITLE=$(head -n 1 title.txt 2>/dev/null || echo "media")
+          if [ -z "$TITLE" ]; then TITLE="media"; fi
+
           echo "file=${FILE}" >> $GITHUB_OUTPUT
           echo "ext=${EXT}" >> $GITHUB_OUTPUT
           echo "mime=${MIME}" >> $GITHUB_OUTPUT
           echo "size=${FILESIZE}" >> $GITHUB_OUTPUT
+          echo "title=${TITLE}" >> $GITHUB_OUTPUT
 
       - name: Upload to R2
         if: success()
@@ -139,13 +145,35 @@ jobs:
           EXT: ${{ steps.download.outputs.ext }}
           MIME: ${{ steps.download.outputs.mime }}
           SIZE: ${{ steps.download.outputs.size }}
+          TITLE: ${{ steps.download.outputs.title }}
         run: |
-          python3 scripts/kv_put.py \
-            --account-id "$CF_ACCOUNT_ID" \
-            --namespace-id "$CF_KV_NAMESPACE_ID" \
-            --api-token "$CF_API_TOKEN" \
-            --key "media:${KEY_BASE}" \
-            --value "{\"ext\":\"${EXT}\",\"mime\":\"${MIME}\",\"size\":${SIZE},\"cached_at\":$(date +%s)}"
+          python3 -c "
+          import json, subprocess, os, time
+          account_id = os.environ['CF_ACCOUNT_ID']
+          namespace_id = os.environ['CF_KV_NAMESPACE_ID']
+          api_token = os.environ['CF_API_TOKEN']
+          key_base = os.environ['KEY_BASE']
+          ext = os.environ['EXT']
+          mime = os.environ['MIME']
+          size = int(os.environ['SIZE'])
+          title = os.environ.get('TITLE', 'media')
+
+          val = json.dumps({
+              'ext': ext,
+              'mime': mime,
+              'size': size,
+              'title': title,
+              'cached_at': int(time.time())
+          })
+          subprocess.run([
+              'python3', 'scripts/kv_put.py',
+              '--account-id', account_id,
+              '--namespace-id', namespace_id,
+              '--api-token', api_token,
+              '--key', f'media:{key_base}',
+              '--value', val
+          ], check=True)
+          "
 
       - name: Clean up pending + report failure
         if: failure()

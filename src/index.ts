@@ -268,7 +268,7 @@ async function handleStream(request: Request, env: Env, keyBase: string): Promis
   const cachedRaw = await env.INDEX.get(`media:${keyBase}`);
   if (!cachedRaw) return json({ error: 'Not found in index' }, { status: 404 }, request, env);
 
-  const meta = JSON.parse(cachedRaw) as { ext: string; mime: string; size: number };
+  const meta = JSON.parse(cachedRaw) as { ext: string; mime: string; size: number; title?: string };
   const range = request.headers.get('Range');
   const object = await env.CACHE.get(`${keyBase}.${meta.ext}`, {
     range: request.headers,
@@ -281,11 +281,20 @@ async function handleStream(request: Request, env: Env, keyBase: string): Promis
     return json({ error: 'File exceeds size limit' }, { status: 413 }, request, env);
   }
 
+  const rawTitle = meta.title || keyBase;
+  const safeAscii = rawTitle.replace(/[^\w\s.-]/g, '').trim() || keyBase;
+  const filename = `${safeAscii}.${meta.ext}`;
+  const utf8Filename = `${rawTitle}.${meta.ext}`;
+
   const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set('Content-Type', meta.mime || headers.get('Content-Type') || 'application/octet-stream');
   headers.set('Accept-Ranges', 'bytes');
   headers.set('Cache-Control', 'public, max-age=86400');
+  headers.set(
+    'Content-Disposition',
+    `inline; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(utf8Filename)}`,
+  );
   for (const [k, v] of Object.entries(getCorsHeaders(request, env))) headers.set(k, v);
 
   if (range && 'range' in object && object.range) {

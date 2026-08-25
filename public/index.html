@@ -199,7 +199,7 @@
         const data = await resp.json();
 
         if (data.status === 'ready') {
-          showStatus(`✅ Ready! <a href="${data.stream_url}" target="_blank">Open / Download</a>`, 'ready');
+          showStatus(`✅ Ready!` + formatReadyStatus(data), 'ready');
           document.getElementById('progressFill').style.width = '100%';
           btn.disabled = false;
           btn.textContent = 'Download';
@@ -215,6 +215,19 @@
         btn.disabled = false;
         btn.textContent = 'Download';
       }
+    }
+
+    function formatReadyStatus(data) {
+      const title = data.title || 'Media';
+      const sizeMb = data.size ? ` (${(data.size / 1024 / 1024).toFixed(1)} MB)` : '';
+      const ext = data.ext || 'mp4';
+      const filename = `${title}.${ext}`;
+      return `
+        <div style="margin-top: 0.5rem;">
+          <div style="font-weight: 600; margin-bottom: 0.4rem; word-break: break-word;">🎬 ${title} ${sizeMb}</div>
+          <a href="${data.stream_url}" download="${filename}" target="_blank" style="display:inline-block; margin-top: 0.3rem; padding: 0.4rem 0.8rem; background: #6366f1; color:#fff; border-radius:6px; text-decoration:none; font-weight:600; font-size:0.85rem;">⬇️ Download ${ext.toUpperCase()}</a>
+        </div>
+      `;
     }
 
     function startPolling(keyBase) {
@@ -246,7 +259,7 @@
           if (data.status === 'ready') {
             clearInterval(pollTimer);
             document.getElementById('progressFill').style.width = '100%';
-            showStatus(`✅ Ready! <a href="${data.stream_url}" target="_blank">Open / Download</a>`, 'ready');
+            showStatus(`✅ Ready!` + formatReadyStatus(data), 'ready');
             document.getElementById('submitBtn').disabled = false;
             document.getElementById('submitBtn').textContent = 'Download';
           } else if (data.status === 'failed') {
