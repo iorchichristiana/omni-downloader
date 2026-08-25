@@ -35,5 +35,38 @@ def main():
         print('Storage is within 9.5 GB limit. No eviction needed.')
         return
 
+    print(f'Storage ({total_gb:.2f} GB) exceeds 9.5 GB soft limit. Evicting oldest files to reach 8.0 GB target...')
+    
+    # Sort oldest first by LastModified timestamp
+    objects.sort(key=lambda x: x.get('LastModified'))
+
+    evicted_count = 0
+    evicted_bytes = 0
+
+    for obj in objects:
+        key = obj.get('Key')
+        size = obj.get('Size', 0)
+        
+        # Delete from R2
+        try:
+            s3.delete_object(Bucket='dl-cache', Key=key)
+            print(f'Deleted R2 object: {key} ({size / (1024 * 1024):.1f} MB)')
+        except Exception as e:
+            print(f'Warning: Failed to delete R2 object {key}: {e}', file=sys.stderr)
+
+        # Delete from KV index (media:<key_base>)
+        key_base = key.rsplit('.', 1)[0]
+        delete_kv_key(account_id, namespace_id, api_token, f'media:{key_base}')
+
+        total_size -= size
+        evicted_count += 1
+        evicted_bytes += size
+
+        if total_size <= TARGET_LIMIT_BYTES:
+            break
+
+    print(f'Eviction complete: Removed {evicted_count} objects ({evicted_bytes / (1024 * 1024):.1f} MB). Current storage: {total_size / (1024 * 1024 * 1024):.2f} GB.')
+
+
 if __name__ == '__main__':
     main()
