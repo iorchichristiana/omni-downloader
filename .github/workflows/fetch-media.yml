@@ -38,9 +38,21 @@ jobs:
           MEDIA_URL: ${{ github.event.client_payload.url }}
           QUALITY: ${{ github.event.client_payload.quality }}
           KEY_BASE: ${{ github.event.client_payload.key_base }}
+          USER_COOKIES: ${{ github.event.client_payload.cookies }}
+          SERVER_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
         run: |
           set -euo pipefail
           
+          # Prepare cookies if provided by user or server secret
+          COOKIE_FLAG=""
+          if [ -n "$USER_COOKIES" ]; then
+            echo "$USER_COOKIES" > cookies.txt
+            COOKIE_FLAG="--cookies cookies.txt"
+          elif [ -n "$SERVER_COOKIES" ]; then
+            echo "$SERVER_COOKIES" > cookies.txt
+            COOKIE_FLAG="--cookies cookies.txt"
+          fi
+
           # Quality label → yt-dlp format selector mapping
           case "$QUALITY" in
             best)  FORMAT='bestvideo*+bestaudio/best/bestvideo/bestaudio' ;;
@@ -57,6 +69,7 @@ jobs:
           if [ "$QUALITY" = "audio" ]; then
             # Audio branch: extract to MP3
             yt-dlp -f "$FORMAT" \
+              $COOKIE_FLAG \
               --extractor-args "youtube:player_client=android_creator,android,ios,tv_embedded" \
               --extract-audio --audio-format mp3 \
               --audio-quality 0 \
@@ -71,6 +84,7 @@ jobs:
           else
             # Video branch: merge to MP4 for universal browser playback
             yt-dlp -f "$FORMAT" \
+              $COOKIE_FLAG \
               --extractor-args "youtube:player_client=android_creator,android,ios,tv_embedded" \
               --merge-output-format mp4 \
               --embed-subs --embed-metadata \
@@ -81,6 +95,8 @@ jobs:
             EXT="mp4"
             MIME="video/mp4"
           fi
+
+          rm -f cookies.txt
 
           # Oversized file guard (500 MB)
           FILESIZE=$(stat -c%s "$FILE")

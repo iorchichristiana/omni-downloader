@@ -111,7 +111,7 @@ function noStore(body: unknown, status = 200, request?: Request, env?: Env): Res
 
 /** POST /api/download — submit URL + quality */
 async function handleDownload(request: Request, env: Env): Promise<Response> {
-  let payload: { url?: string; quality?: string };
+  let payload: { url?: string; quality?: string; cookies?: string };
   try {
     payload = await request.json();
   } catch {
@@ -120,6 +120,7 @@ async function handleDownload(request: Request, env: Env): Promise<Response> {
 
   const mediaUrl = payload.url?.trim();
   const quality = payload.quality?.trim();
+  const cookies = typeof payload.cookies === 'string' && payload.cookies.length < 65536 ? payload.cookies : undefined;
 
   if (!mediaUrl || !quality) {
     return json({ error: 'Missing "url" or "quality"' }, { status: 400 }, request, env);
@@ -179,7 +180,7 @@ async function handleDownload(request: Request, env: Env): Promise<Response> {
   );
 
   // 5. Dispatch GitHub Actions repository_dispatch
-  const dispatched = await dispatchGitHub(env, mediaUrl, quality, keyBase);
+  const dispatched = await dispatchGitHub(env, mediaUrl, quality, keyBase, cookies);
 
   // 6. Optional Render fallback if GitHub dispatch fails
   if (!dispatched && env.RENDER_URL) {
@@ -196,7 +197,7 @@ async function handleDownload(request: Request, env: Env): Promise<Response> {
   return json({ status: 'pending', key_base: keyBase }, { status: 202 }, request, env);
 }
 
-async function dispatchGitHub(env: Env, url: string, quality: string, keyBase: string): Promise<boolean> {
+async function dispatchGitHub(env: Env, url: string, quality: string, keyBase: string, cookies?: string): Promise<boolean> {
   try {
     const resp = await fetch(`https://api.github.com/repos/${env.GITHUB_REPO}/dispatches`, {
       method: 'POST',
@@ -209,7 +210,7 @@ async function dispatchGitHub(env: Env, url: string, quality: string, keyBase: s
       },
       body: JSON.stringify({
         event_type: 'fetch-media',
-        client_payload: { url, quality, key_base: keyBase },
+        client_payload: { url, quality, key_base: keyBase, cookies },
       }),
     });
     if (!resp.ok) {

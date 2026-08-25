@@ -133,6 +133,14 @@
         <option value="audio">Audio only (MP3)</option>
       </select>
 
+      <details style="margin-bottom: 1rem; font-size: 0.85rem; color: var(--muted);">
+        <summary style="cursor: pointer; padding: 0.3rem 0;">🍪 Custom Cookies (Optional - for private/age-restricted videos)</summary>
+        <div style="margin-top: 0.5rem;">
+          <input type="file" id="cookieFile" accept=".txt" style="margin-bottom: 0.5rem; font-size: 0.8rem; width: 100%;" />
+          <textarea id="cookieText" placeholder="Or paste Netscape format cookies.txt content here..." style="width: 100%; height: 60px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 0.4rem; font-size: 0.8rem; font-family: monospace; resize: vertical;"></textarea>
+        </div>
+      </details>
+
       <button id="submitBtn" onclick="submitDownload()">Download</button>
 
       <div id="status" class="status"></div>
@@ -155,10 +163,20 @@
       const btn = document.getElementById('submitBtn');
       const statusEl = document.getElementById('status');
       const progressBar = document.getElementById('progressBar');
+      const cookieFileInput = document.getElementById('cookieFile');
+      let cookies = document.getElementById('cookieText').value.trim();
 
       if (!url) {
         showStatus('Please enter a URL.', 'error');
         return;
+      }
+
+      if (!cookies && cookieFileInput && cookieFileInput.files && cookieFileInput.files[0]) {
+        try {
+          cookies = await cookieFileInput.files[0].text();
+        } catch (e) {
+          console.warn('Failed to read cookie file', e);
+        }
       }
 
       btn.disabled = true;
@@ -170,10 +188,13 @@
       if (pollTimer) clearInterval(pollTimer);
 
       try {
+        const payload = { url, quality };
+        if (cookies) payload.cookies = cookies;
+
         const resp = await fetch('/api/download', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url, quality }),
+          body: JSON.stringify(payload),
         });
         const data = await resp.json();
 
