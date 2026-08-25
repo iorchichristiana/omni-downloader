@@ -22,26 +22,10 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install yt-dlp, ffmpeg, and rclone
+      - name: Install yt-dlp, ffmpeg, and boto3
         run: |
-          pip install -U "yt-dlp[default]" curl_cffi
-          sudo apt-get update && sudo apt-get install -y ffmpeg rclone
-
-      - name: Configure rclone for R2
-        env:
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY }}
-          R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY }}
-        run: |
-          mkdir -p ~/.config/rclone
-          cat > ~/.config/rclone/rclone.conf <<EOF
-          [r2]
-          type = s3
-          provider = Cloudflare
-          access_key_id = ${R2_ACCESS_KEY}
-          secret_access_key = ${R2_SECRET_KEY}
-          endpoint = https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
-          EOF
+          pip install -U "yt-dlp[default]" curl_cffi boto3
+          sudo apt-get update && sudo apt-get install -y ffmpeg
 
       - name: Download media
         id: download
@@ -110,11 +94,21 @@ jobs:
       - name: Upload to R2
         if: success()
         env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY }}
+          R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY }}
           KEY_BASE: ${{ github.event.client_payload.key_base }}
           FILE: ${{ steps.download.outputs.file }}
           EXT: ${{ steps.download.outputs.ext }}
+          MIME: ${{ steps.download.outputs.mime }}
         run: |
-          rclone copyto "$FILE" "r2:dl-cache/${KEY_BASE}.${EXT}" --progress
+          python3 scripts/r2_put.py \
+            --account-id "$R2_ACCOUNT_ID" \
+            --access-key "$R2_ACCESS_KEY" \
+            --secret-key "$R2_SECRET_KEY" \
+            --key "${KEY_BASE}.${EXT}" \
+            --file "$FILE" \
+            --content-type "$MIME"
 
       - name: Update KV index
         if: success()
