@@ -207,8 +207,12 @@ async function handleStream(request: Request, env: Env, keyBase: string): Promis
   if (!cachedRaw) return json({ error: 'Not found in index' }, { status: 404 });
 
   const meta = JSON.parse(cachedRaw) as { ext: string; mime: string; size: number };
-  const object = await env.CACHE.get(`${keyBase}.${meta.ext}`);
-  if (!object) return json({ error: 'Object not in R2' }, { status: 404 });
+  const range = request.headers.get('Range');
+  const object = await env.CACHE.get(`${keyBase}.${meta.ext}`, {
+    range: request.headers,
+    onlyIf: request.headers,
+  });
+  if (!object || !('body' in object)) return json({ error: 'Object not in R2' }, { status: 404 });
 
   // Oversized guard
   if (object.size > MAX_FILE_SIZE) {
@@ -219,24 +223,19 @@ async function handleStream(request: Request, env: Env, keyBase: string): Promis
   object.writeHttpMetadata(headers);
   headers.set('Content-Type', meta.mime || headers.get('Content-Type') || 'application/octet-stream');
   headers.set('Accept-Ranges', 'bytes');
-  headers.set('Content-Length', object.size.toString());
   headers.set('Cache-Control', 'public, max-age=86400');
   for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v);
 
-  // Range request → 206 Partial Content
-  const range = request.headers.get('Range');
-  if (range) {
-    const match = range.match(/bytes=(\d*)-(\d*)/);
-    if (match) {
-      const start = match[1] ? parseInt(match[1], 10) : 0;
-      const end = match[2] ? parseInt(match[2], 10) : object.size - 1;
-      const length = end - start + 1;
-      headers.set('Content-Range', `bytes ${start}-${end}/${object.size}`);
-      headers.set('Content-Length', length.toString());
-      return new Response(object.body.slice(start, end + 1), { status: 206, headers });
-    }
+  if (range && 'range' in object && object.range) {
+    const r = object.range as { offset?: number; length?: number };
+    const offset = r.offset ?? 0;
+    const length = r.length ?? object.size;
+    headers.set('Content-Range', `bytes ${offset}-${offset + length - 1}/${object.size}`);
+    headers.set('Content-Length', length.toString());
+    return new Response(object.body, { status: 206, headers });
   }
 
+  headers.set('Content-Length', object.size.toString());
   return new Response(object.body, { status: 200, headers });
 }
 

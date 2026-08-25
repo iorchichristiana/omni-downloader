@@ -14,10 +14,9 @@ binding = "CACHE"
 bucket_name = "dl-cache"
 
 # ── KV namespace binding ──────────────────────────────────
-# Replace YOUR_KV_NAMESPACE_ID with the real ID after creating the namespace.
 [[kv_namespaces]]
 binding = "INDEX"
-id = "YOUR_KV_NAMESPACE_ID"
+id = "5ace8becc73144efb572cacaeb0c7a42"
 
 # ── Secrets (set via `wrangler secret put`) ───────────────
 # GITHUB_TOKEN  — fine-grained PAT with "Actions: write" on your repo
