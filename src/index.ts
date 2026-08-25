@@ -204,6 +204,7 @@ async function dispatchGitHub(env: Env, url: string, quality: string, keyBase: s
         Authorization: `Bearer ${env.GITHUB_TOKEN}`,
         Accept: 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'Omni-Downloader-Worker',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -211,8 +212,12 @@ async function dispatchGitHub(env: Env, url: string, quality: string, keyBase: s
         client_payload: { url, quality, key_base: keyBase },
       }),
     });
+    if (!resp.ok) {
+      console.error(`GitHub dispatch failed: ${resp.status} ${await resp.text()}`);
+    }
     return resp.ok;
-  } catch {
+  } catch (err) {
+    console.error('GitHub dispatch error:', err);
     return false;
   }
 }

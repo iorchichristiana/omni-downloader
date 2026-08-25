@@ -22,13 +22,10 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install yt-dlp and ffmpeg
+      - name: Install yt-dlp, ffmpeg, and rclone
         run: |
           pip install -U yt-dlp
-          sudo apt-get update && sudo apt-get install -y ffmpeg
-
-      - name: Install rclone
-        uses: rclone/setup-rclone@v1
+          sudo apt-get update && sudo apt-get install -y ffmpeg rclone
 
       - name: Configure rclone for R2
         env:
