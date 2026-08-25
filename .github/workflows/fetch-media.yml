@@ -1,0 +1,153 @@
+name: Fetch Media
+
+on:
+  repository_dispatch:
+    types: [fetch-media]
+
+# 20 concurrent jobs max on Free plan — this prevents queue pile-up
+concurrency:
+  group: fetch-${{ github.event.client_payload.key_base }}
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install yt-dlp and ffmpeg
+        run: |
+          pip install -U yt-dlp
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install rclone
+        uses: rclone/setup-rclone@v1
+
+      - name: Configure rclone for R2
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY }}
+          R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY }}
+        run: |
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf <<EOF
+          [r2]
+          type = s3
+          provider = Cloudflare
+          access_key_id = ${R2_ACCESS_KEY}
+          secret_access_key = ${R2_SECRET_KEY}
+          endpoint = https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
+          EOF
+
+      - name: Download media
+        id: download
+        env:
+          MEDIA_URL: ${{ github.event.client_payload.url }}
+          QUALITY: ${{ github.event.client_payload.quality }}
+          KEY_BASE: ${{ github.event.client_payload.key_base }}
+        run: |
+          set -euo pipefail
+          
+          # Quality label → yt-dlp format selector mapping
+          case "$QUALITY" in
+            1080p) FORMAT='bestvideo[height<=1080]+bestaudio/best[height<=1080]/best' ;;
+            720p)  FORMAT='bestvideo[height<=720]+bestaudio/best[height<=720]/best' ;;
+            480p)  FORMAT='bestvideo[height<=480]+bestaudio/best[height<=480]/best' ;;
+            360p)  FORMAT='bestvideo[height<=360]+bestaudio/best[height<=360]/best' ;;
+            audio) FORMAT='bestaudio/best' ;;
+            *) echo "Invalid quality: $QUALITY"; exit 1 ;;
+          esac
+
+          OUTFILE="output"
+          
+          if [ "$QUALITY" = "audio" ]; then
+            # Audio branch: extract to MP3
+            yt-dlp -f "$FORMAT" \
+              --extract-audio --audio-format mp3 \
+              --audio-quality 0 \
+              -o "${OUTFILE}.%(ext)s" \
+              --no-playlist \
+              "$MEDIA_URL"
+            # Find the actual output file
+            FILE=$(ls -1 ${OUTFILE}.* | head -1)
+            EXT="mp3"
+            MIME="audio/mpeg"
+          else
+            # Video branch: merge to MKV (safe container for any codec combo)
+            yt-dlp -f "$FORMAT" \
+              --merge-output-format mkv \
+              -o "${OUTFILE}.%(ext)s" \
+              --no-playlist \
+              "$MEDIA_URL"
+            FILE=$(ls -1 ${OUTFILE}.* | head -1)
+            EXT="mkv"
+            MIME="video/x-matroska"
+          fi
+
+          # Oversized file guard (500 MB)
+          FILESIZE=$(stat -c%s "$FILE")
+          if [ "$FILESIZE" -gt 524288000 ]; then
+            echo "File too large: ${FILESIZE} bytes"
+            exit 2
+          fi
+
+          echo "file=${FILE}" >> $GITHUB_OUTPUT
+          echo "ext=${EXT}" >> $GITHUB_OUTPUT
+          echo "mime=${MIME}" >> $GITHUB_OUTPUT
+          echo "size=${FILESIZE}" >> $GITHUB_OUTPUT
+
+      - name: Upload to R2
+        if: success()
+        env:
+          KEY_BASE: ${{ github.event.client_payload.key_base }}
+          FILE: ${{ steps.download.outputs.file }}
+          EXT: ${{ steps.download.outputs.ext }}
+        run: |
+          rclone copyto "$FILE" "r2:dl-cache/${KEY_BASE}.${EXT}" --progress
+
+      - name: Update KV index
+        if: success()
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          KEY_BASE: ${{ github.event.client_payload.key_base }}
+          EXT: ${{ steps.download.outputs.ext }}
+          MIME: ${{ steps.download.outputs.mime }}
+          SIZE: ${{ steps.download.outputs.size }}
+        run: |
+          python3 scripts/kv_put.py \
+            --account-id "$CF_ACCOUNT_ID" \
+            --namespace-id "$CF_KV_NAMESPACE_ID" \
+            --api-token "$CF_API_TOKEN" \
+            --key "media:${KEY_BASE}" \
+            --value "{\"ext\":\"${EXT}\",\"mime\":\"${MIME}\",\"size\":${SIZE},\"cached_at\":$(date +%s)}"
+
+      - name: Clean up pending + report failure
+        if: failure()
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          KEY_BASE: ${{ github.event.client_payload.key_base }}
+        run: |
+          # Delete pending entry
+          curl -s -X DELETE \
+            "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/storage/kv/namespaces/${CF_KV_NAMESPACE_ID}/values/pending:${KEY_BASE}" \
+            -H "Authorization: Bearer ${CF_API_TOKEN}" || true
+
+          # Write failed entry (1-hour TTL via separate script call)
+          python3 scripts/kv_put.py \
+            --account-id "$CF_ACCOUNT_ID" \
+            --namespace-id "$CF_KV_NAMESPACE_ID" \
+            --api-token "$CF_API_TOKEN" \
+            --key "failed:${KEY_BASE}" \
+            --ttl 3600 \
+            --value "{\"error\":\"yt-dlp fetch failed\",\"failed_at\":$(date +%s)}"

@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: omni-downloader-fallback
+    runtime: python
+    plan: free
+    buildCommand: |
+      pip install -r requirements.txt
+      curl https://rclone.org/install.sh | bash
+    startCommand: gunicorn app:app --timeout 300
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0

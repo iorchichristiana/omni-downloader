@@ -1,0 +1,30 @@
+name = "omni-downloader"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+
+# ── Static assets (frontend) ──────────────────────────────
+# The Worker serves API routes; everything else falls through
+# to the static files in ./public.
+[assets]
+directory = "./public"
+
+# ── R2 bucket binding ─────────────────────────────────────
+[[r2_buckets]]
+binding = "CACHE"
+bucket_name = "dl-cache"
+
+# ── KV namespace binding ──────────────────────────────────
+# Replace YOUR_KV_NAMESPACE_ID with the real ID after creating the namespace.
+[[kv_namespaces]]
+binding = "INDEX"
+id = "YOUR_KV_NAMESPACE_ID"
+
+# ── Secrets (set via `wrangler secret put`) ───────────────
+# GITHUB_TOKEN  — fine-grained PAT with "Actions: write" on your repo
+# GITHUB_REPO   — "owner/repo" of your public repo (e.g. "user/omni-downloader")
+# RENDER_URL    — optional Render fallback URL (leave unset to skip)
+
+# To set secrets:
+#   wrangler secret put GITHUB_TOKEN
+#   wrangler secret put GITHUB_REPO
+#   wrangler secret put RENDER_URL   (optional)

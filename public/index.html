@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Omni-Platform Downloader</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --accent: #f6821f;
+      --accent-hover: #e0741a;
+      --text: #e4e6eb;
+      --muted: #8b8f9a;
+      --success: #3fb950;
+      --error: #f85149;
+      --border: #2a2e3a;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+    .container {
+      max-width: 560px;
+      width: 100%;
+    }
+    h1 {
+      font-size: 1.6rem;
+      margin-bottom: 0.25rem;
+    }
+    .subtitle {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-bottom: 1.5rem;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+    }
+    label {
+      display: block;
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 0.4rem;
+    }
+    input[type="url"], select {
+      width: 100%;
+      padding: 0.65rem 0.75rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 0.95rem;
+      margin-bottom: 1rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input[type="url"]:focus, select:focus {
+      border-color: var(--accent);
+    }
+    button {
+      width: 100%;
+      padding: 0.7rem;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    button:hover:not(:disabled) { background: var(--accent-hover); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .status {
+      margin-top: 1.25rem;
+      padding: 0.85rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      display: none;
+    }
+    .status.show { display: block; }
+    .status.pending { background: rgba(246,130,31,0.1); color: var(--accent); }
+    .status.ready { background: rgba(63,185,80,0.1); color: var(--success); }
+    .status.error { background: rgba(248,81,73,0.1); color: var(--error); }
+    .status a { color: inherit; text-decoration: underline; }
+    .progress-bar {
+      margin-top: 0.5rem;
+      height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: var(--accent);
+      width: 0;
+      transition: width 0.3s;
+    }
+    .footer {
+      margin-top: 1.5rem;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>⬇️ Omni-Platform Downloader</h1>
+    <p class="subtitle">Paste a link from YouTube, TikTok, Reddit, Vimeo, SoundCloud, and 1,700+ more sites.</p>
+
+    <div class="card">
+      <label for="url">Media URL</label>
+      <input type="url" id="url" placeholder="https://..." autocomplete="off" />
+
+      <label for="quality">Quality</label>
+      <select id="quality">
+        <option value="1080p">1080p (best)</option>
+        <option value="720p" selected>720p</option>
+        <option value="480p">480p</option>
+        <option value="360p">360p</option>
+        <option value="audio">Audio only (MP3)</option>
+      </select>
+
+      <button id="submitBtn" onclick="submitDownload()">Download</button>
+
+      <div id="status" class="status"></div>
+      <div id="progressBar" class="progress-bar" style="display:none;">
+        <div id="progressFill" class="progress-bar-fill"></div>
+      </div>
+    </div>
+
+    <div class="footer">
+      100% free · cached files served instantly · powered by Cloudflare Workers + R2 + GitHub Actions
+    </div>
+  </div>
+
+  <script>
+    let pollTimer = null;
+
+    async function submitDownload() {
+      const url = document.getElementById('url').value.trim();
+      const quality = document.getElementById('quality').value;
+      const btn = document.getElementById('submitBtn');
+      const statusEl = document.getElementById('status');
+      const progressBar = document.getElementById('progressBar');
+
+      if (!url) {
+        showStatus('Please enter a URL.', 'error');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Submitting…';
+      showStatus('Submitting request…', 'pending');
+      progressBar.style.display = 'block';
+      document.getElementById('progressFill').style.width = '10%';
+
+      if (pollTimer) clearInterval(pollTimer);
+
+      try {
+        const resp = await fetch('/api/download', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, quality }),
+        });
+        const data = await resp.json();
+
+        if (data.status === 'ready') {
+          showStatus(`✅ Ready! <a href="${data.stream_url}" target="_blank">Open / Download</a>`, 'ready');
+          document.getElementById('progressFill').style.width = '100%';
+          btn.disabled = false;
+          btn.textContent = 'Download';
+        } else if (data.status === 'pending') {
+          showStatus('⏳ Fetching media… this can take 30–90 seconds for new content.', 'pending');
+          startPolling(data.key_base);
+        } else {
+          throw new Error(data.error || 'Unexpected response');
+        }
+      } catch (err) {
+        showStatus(`❌ ${err.message}`, 'error');
+        progressBar.style.display = 'none';
+        btn.disabled = false;
+        btn.textContent = 'Download';
+      }
+    }
+
+    function startPolling(keyBase) {
+      let elapsed = 0;
+      const maxWait = 300; // 5 minutes max
+      let progress = 10;
+
+      pollTimer = setInterval(async () => {
+        elapsed += 3;
+        progress = Math.min(90, progress + 3);
+        document.getElementById('progressFill').style.width = progress + '%';
+
+        if (elapsed > maxWait) {
+          clearInterval(pollTimer);
+          showStatus('⏱️ Timed out waiting for the fetch job. Try again — it may still be processing.', 'error');
+          document.getElementById('submitBtn').disabled = false;
+          document.getElementById('submitBtn').textContent = 'Download';
+          document.getElementById('progressBar').style.display = 'none';
+          return;
+        }
+
+        try {
+          const resp = await fetch(`/api/meta?key=${encodeURIComponent(keyBase)}`, {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-store' },
+          });
+          const data = await resp.json();
+
+          if (data.status === 'ready') {
+            clearInterval(pollTimer);
+            document.getElementById('progressFill').style.width = '100%';
+            showStatus(`✅ Ready! <a href="${data.stream_url}" target="_blank">Open / Download</a>`, 'ready');
+            document.getElementById('submitBtn').disabled = false;
+            document.getElementById('submitBtn').textContent = 'Download';
+          } else if (data.status === 'failed') {
+            clearInterval(pollTimer);
+            showStatus(`❌ Fetch failed: ${data.error || 'unknown error'}. Try again or a different URL.`, 'error');
+            document.getElementById('submitBtn').disabled = false;
+            document.getElementById('submitBtn').textContent = 'Download';
+            document.getElementById('progressBar').style.display = 'none';
+          }
+        } catch (e) {
+          // network blip — keep polling
+        }
+      }, 3000);
+    }
+
+    function showStatus(html, type) {
+      const el = document.getElementById('status');
+      el.className = `status show ${type}`;
+      el.innerHTML = html;
+    }
+
+    document.getElementById('url').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') submitDownload();
+    });
+  </script>
+</body>
+</html>
