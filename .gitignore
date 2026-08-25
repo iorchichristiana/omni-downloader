@@ -3,4 +3,6 @@ node_modules/
 dist/
 .env*
 Git-access-token.txt
+access-token.txt
+*token*.txt
 *.log
