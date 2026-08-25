@@ -1,4 +1,4 @@
-name: YouTube Cookie Health Check
+﻿name: YouTube Cookie Health Check
 
 on:
   schedule:
@@ -33,7 +33,7 @@ jobs:
           git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git $HOME/bgutil-ytdlp-pot-provider
           cd $HOME/bgutil-ytdlp-pot-provider/server
           npm ci
-          npm run build
+          npx tsc
 
       - name: Test YouTube extraction
         id: test_yt
@@ -64,7 +64,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const title = '?? YouTube cookies expired � re-export needed';
+            const title = '⚠️ YouTube cookies expired — re-export needed';
             const { data: issues } = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
